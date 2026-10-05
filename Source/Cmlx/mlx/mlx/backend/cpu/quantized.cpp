@@ -1,5 +1,6 @@
-// Copyright © 2023 Apple Inc.
+// Copyright © 2023-2026 Apple Inc.
 
+#include "mlx/backend/common/quantized.h"
 #include "mlx/backend/common/unary.h"
 #include "mlx/backend/cpu/copy.h"
 #include "mlx/backend/cpu/encoder.h"
@@ -58,15 +59,6 @@ static inline T dequantize_scale(uint8_t s) {
     out.i = (s == 0 ? 0x40 : (static_cast<uint16_t>(s) << 7));
     return static_cast<T>(out.f);
   }
-}
-
-inline constexpr short get_pack_factor(int bits, int wsize = 8) {
-  return (bits == 3 || bits == 5) ? 8 : (bits == 6 ? 4 : wsize / bits);
-}
-
-inline constexpr short get_bytes_per_pack(int bits, int wsize = 8) {
-  auto power_of_2_bits = (bits & (bits - 1)) == 0;
-  return power_of_2_bits ? (wsize / 8) : (bits == 5 ? 5 : 3);
 }
 
 template <typename T, int bits>
@@ -1069,6 +1061,15 @@ uint8_t to_fp8_e8m0(float x) {
   return static_cast<uint8_t>(n + 127);
 }
 
+// Smallest E8M0 >= x, so a block's largest elements do not saturate.
+uint8_t to_fp8_e8m0_round_up(float x) {
+  uint8_t bits = to_fp8_e8m0(x);
+  if (bits < 0xFE && dequantize_scale<float, 32>(bits) < x) {
+    bits += 1;
+  }
+  return bits;
+}
+
 uint8_t to_fp4_e2m1(float x) {
   if (std::isnan(x)) {
     return 0x7;
@@ -1120,7 +1121,7 @@ void fp_quantize_dequantize(
     if (group_size == 16) {
       scale = dequantize_scale<float, 16>(detail::ToFP8()(scale));
     } else {
-      scale = dequantize_scale<float, 32>(to_fp8_e8m0(scale));
+      scale = dequantize_scale<float, 32>(to_fp8_e8m0_round_up(scale));
     }
 
     for (int j = 0; j < group_size; ++j) {
@@ -1365,6 +1366,10 @@ void QQMatmul::eval_cpu(const std::vector<array>& inputs, array& out) {
   } else {
     throw std::runtime_error("[QQMatmul] NYI for the general case");
   }
+}
+
+void GatherQQMM::eval_cpu(const std::vector<array>& inputs, array& out) {
+  throw std::runtime_error("[GatherQQMM] NYI");
 }
 
 } // namespace mlx::core

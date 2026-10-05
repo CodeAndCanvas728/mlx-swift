@@ -91,12 +91,7 @@ dependencies: [.product(name: "MLX", package: "mlx-swift"),
                .product(name: "MLXOptimizers", package: "mlx-swift")]
 ```
 
-10. Update `tools/generate_integration_tests.py` as needed
-
-```
-import MLXNN
-@testable import MLXOptimizers
-```
+10. Update `tools/integration_tests/cases.py` as needed, regenerate tests if needed
 
 11. Update tests as needed
 
@@ -120,8 +115,14 @@ pre-commit run --all-files
 
 SwiftPM is able to fetch repositories from github and build them _if_ they have
 a `Package.swift` at the top level. It is unable to do this for repositories
-that do not have a `Package.swift`. For this reason `mlx-swift` uses
+that do not have a `Package.swift`. For this reason upstream `mlx-swift` uses
 git submodules to include the `mlx` and `mlx-c` repositories.
+
+> **SharpAI fork:** this fork vendors `Source/Cmlx/mlx` and `Source/Cmlx/mlx-c` as plain tracked
+> directories (upstream release + the SharpAI patch series) instead of submodules. Follow
+> [UPSTREAM_MERGE_PLAN.md](UPSTREAM_MERGE_PLAN.md) for the fork's procedure; the steps below
+> describe the upstream process, which the fork follows with step 1 replaced by "re-vendor the
+> tag/commit upstream's submodules point to, then re-apply the carried patches".
 
 When a new version of `mlx` and its equivalent `mlx-c` are to be used, there is a
 process to go through to update `mlx-swift`.
