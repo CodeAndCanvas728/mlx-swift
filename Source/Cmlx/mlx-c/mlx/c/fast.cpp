@@ -29,6 +29,25 @@ void prefault(const array& a) {
 }
 }
 
+extern "C" int mlx_fast_cross_entropy(
+    mlx_array* res,
+    const mlx_array logits,
+    const mlx_array targets,
+    const mlx_stream s) {
+  try {
+    mlx_array_set_(
+        *res,
+        mlx::core::fast::cross_entropy(
+            mlx_array_get_(logits),
+            mlx_array_get_(targets),
+            mlx_stream_get_(s)));
+  } catch (std::exception& e) {
+    mlx_error(e.what());
+    return 1;
+  }
+  return 0;
+}
+
 struct mlx_fast_cuda_kernel_config_cpp_ {
   std::vector<mlx::core::Shape> output_shapes;
   std::vector<mlx::core::Dtype> output_dtypes;
@@ -631,6 +650,7 @@ extern "C" int mlx_fast_scaled_dot_product_attention(
     const char* mask_mode,
     const mlx_array mask_arr /* may be null */,
     const mlx_array sinks /* may be null */,
+    bool force_fused,
     const mlx_stream s) {
   try {
     mlx_array_set_(
@@ -645,6 +665,7 @@ extern "C" int mlx_fast_scaled_dot_product_attention(
                           : std::nullopt),
             (sinks.ctx ? std::make_optional(mlx_array_get_(sinks))
                        : std::nullopt),
+            force_fused,
             mlx_stream_get_(s)));
   } catch (std::exception& e) {
     mlx_error(e.what());
@@ -653,10 +674,21 @@ extern "C" int mlx_fast_scaled_dot_product_attention(
   return 0;
 }
 
+#include <fcntl.h>
+#include <unistd.h>
 #include <json.hpp>
+#include <condition_variable>
+#include <cstring>
+#include <deque>
 #include <fstream>
+#include <memory>
 #include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 #include "mlx/backend/metal/ssd_streamer.h"
 
 struct SSDStreamEntry {
@@ -770,8 +802,7 @@ extern "C" int mlx_fast_streamed_gather_mm(
             active_expert,
             streamer,
             eo,
-            mlx_stream_get_(s).device
-        ));
+            mlx_stream_get_(s)));
   } catch (std::exception& e) {
     mlx_error(e.what());
     return 1;
@@ -868,11 +899,6 @@ extern "C" int mlx_fast_prefault(
 // This gives full NVMe sequential throughput (~5 GB/s) while preserving all
 // MLX tensor metadata (shape, strides, dtype) on the dst array.
 // ─────────────────────────────────────────────────────────────────────────────
-#include <queue>
-#include <deque>
-#include <thread>
-#include <condition_variable>
-
 struct STPReadEntry {
     int fd = -1;
     size_t data_start = 0;
@@ -918,7 +944,6 @@ static STPReadEntry get_safetensors_entry(const std::string& path, const std::st
     return entry;
 }
 
-#include <unordered_set>
 // --- PAPPS Async Background Worker (16-Thread Pool) ---
 struct PAPPSJob {
     std::string cache_id;
@@ -1009,18 +1034,26 @@ public:
 
     bool try_take(const std::string& cache_id, void* dst, size_t length) {
         void* src = nullptr;
+        size_t stored = 0;
         {
             std::lock_guard<std::mutex> lock(cache_mutex_);
             auto it = cache_.find(cache_id);
             if (it != cache_.end()) {
                 src = it->second.first;
+                stored = it->second.second;
                 cache_.erase(it);
             }
         }
         if (src) {
-            std::memcpy(dst, src, length);
+            // Only absorb the prefetched slice if it is exactly the size being
+            // requested; otherwise treat it as a miss so the caller preads
+            // synchronously instead of over-reading the cached buffer.
+            bool exact = (stored == length);
+            if (exact) {
+                std::memcpy(dst, src, length);
+            }
             free(src);
-            return true;
+            return exact;
         }
         return false;
     }

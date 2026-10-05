@@ -28,6 +28,12 @@ extern "C" {
  */
 /**@{*/
 
+int mlx_fast_cross_entropy(
+    mlx_array* res,
+    const mlx_array logits,
+    const mlx_array targets,
+    const mlx_stream s);
+
 typedef struct mlx_fast_cuda_kernel_config_ {
   void* ctx;
 } mlx_fast_cuda_kernel_config;
@@ -195,7 +201,10 @@ int mlx_fast_scaled_dot_product_attention(
     const char* mask_mode,
     const mlx_array mask_arr /* may be null */,
     const mlx_array sinks /* may be null */,
+    bool force_fused,
     const mlx_stream s);
+
+// ── SharpAI custom ops (not part of upstream mlx-c) ──────────────────────────
 
 int mlx_fast_streamed_gather_mm(
     mlx_array* res,
@@ -228,6 +237,12 @@ int mlx_fast_turbo_decode_v(
 
 int mlx_fast_prefault(mlx_array x);
 
+// pread() directly into the already-evaluated MLX array's unified memory buffer.
+// This gives full NVMe sequential throughput without OS page-fault overhead.
+// The array MUST already be evaluated (concrete pointer exists).
+// safetensors_path: full path to .safetensors file
+// tensor_name: e.g. "model.layers.0.mlp.experts.gate_proj.weight"
+// expert_index: 0-based index of the expert to read
 int mlx_fast_pread_into(
     mlx_array dst,
     const char* safetensors_path,
@@ -267,10 +282,12 @@ typedef struct MlxSSDMetricsSnapshot {
     double   avg_chunk_latency_ms; /* Lifetime average per-chunk latency (ms) */
 } MlxSSDMetricsSnapshot;
 
+// Implemented in the SharpAI mlx fork (mlx/core/moe_stream_op.cpp).
 void mlx_ssd_metrics_snapshot(MlxSSDMetricsSnapshot* out);
 
 // TurboKV telemetry — call from Swift on each compression event to accumulate
 // stats that appear in the 10-second SSD stream log.
+// Implemented in the SharpAI mlx fork (mlx/core/moe_stream_op.cpp).
 void mlx_turbo_kv_record(uint64_t tokens, uint64_t orig_bytes, uint64_t packed_bytes);
 
 #ifdef __cplusplus
