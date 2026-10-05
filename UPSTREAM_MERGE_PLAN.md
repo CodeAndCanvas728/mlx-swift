@@ -14,8 +14,10 @@ this repository and a SwiftPM consumer needs nothing but this package.
 
 | Directory | Contents |
 |---|---|
-| `Source/Cmlx/mlx` | upstream `ml-explore/mlx` **v0.32.2** (`1f8e74e`) + the patch series below |
+| `Source/Cmlx/mlx` | upstream `ml-explore/mlx` **v0.32.3** (`64ea011`) + the patch series below |
 | `Source/Cmlx/mlx-c` | upstream `ml-explore/mlx-c` **`ebc88f1`** + the patch series below |
+
+> mlx-c has not caught up with core 0.32.3 upstream (its `main` is `a341b49`, a version bump on top of `ebc88f1`), so this fork carries one adaptation: `mlx_gather_qmm` passes `std::nullopt` for the core's new `global_scale` argument (mlx #4458). The C API does not expose it yet.
 | `Source/Cmlx/mlx-generated` | produced by `tools/update-mlx.sh` (never edit by hand) |
 
 `.gitmodules` is intentionally absent. When a merge reports a conflict on
@@ -31,7 +33,7 @@ submodule pointer: delete it (`git rm`) and re-vendor the tree instead.
   and the matching hooks in `mlx/fast.{h,cpp}`.
 - **TurboKV**: `mlx/fast/turbo_quant.h` and the TurboQuant decompression path in
   `mlx/backend/metal/kernels/sdpa_vector.h`.
-- **I/O fast loaders**: `mlx/io/load.{h,cpp}` (thread-pooled, pread-based loaders).
+- **I/O loaders**: `mlx/io/load.{h,cpp}`. Since 0.32.3 upstream's `ParallelFileReader` has its own shared batch pool; the fork keeps that and adds only the iOS guards (`MLX_IO_THREAD_COUNT`, `MLX_IOS_SEQUENTIAL_IO`: sequential `pread()`, one reader thread).
 - **Metal device**: `mlx/backend/metal/device.cpp` carries only quieter Metal compile logging. The
   old "lazily create a command encoder when a stream is first used on a new thread" patch is **not**
   carried: upstream's Swift `StreamPool` creates every stream with `mlx_stream_new_thread_unsafe`
