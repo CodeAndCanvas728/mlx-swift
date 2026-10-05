@@ -1,17 +1,37 @@
-// swift-tools-version: 5.12
+// swift-tools-version: 6.3;(experimentalCGen)
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 // Copyright © 2024 Apple Inc.
 
 import PackageDescription
 
-// SharpAI fork: upstream builds CUDA on Linux through a SwiftPM build-tool plugin
-// (CudaBuild/encuda), which requires swift-tools-version 6.3 (experimentalCGen). The
-// Apple toolchains this fork supports are older, and the fork ships no CUDA backend, so
-// the plugin/targets are intentionally not wired up here (Source/Encuda and
-// Plugins/CudaBuild stay in the tree, unused, to keep future upstream merges clean).
-let cudaBuildPlugins: [Target.PluginUsage] = []
-let cudaPackageDependencies: [Package.Dependency] = []
-let cudaTargets: [Target] = []
+#if os(Linux)
+    let cudaBuildPlugins: [Target.PluginUsage] = [
+        .plugin(name: "CudaBuild")
+    ]
+    let cudaPackageDependencies: [Package.Dependency] = [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.0.0")
+    ]
+    let cudaTargets: [Target] = [
+        .executableTarget(
+            name: "encuda",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ],
+            path: "Source/Encuda",
+        ),
+        .plugin(
+            name: "CudaBuild",
+            capability: .buildTool(),
+            dependencies: [
+                .target(name: "encuda")
+            ],
+        ),
+    ]
+#else
+    let cudaBuildPlugins: [Target.PluginUsage] = []
+    let cudaPackageDependencies: [Package.Dependency] = []
+    let cudaTargets: [Target] = []
+#endif
 
 let noMetalCmlxExcludes = [
     // Exclude Metal backend files, but keep no_metal.cpp for stubs
@@ -95,40 +115,91 @@ let noCudaCmlxExcludes = [
     let linkerSettings: [LinkerSetting]
     let mlxSwiftExcludes: [String]
 
-    // Linux without CUDA (CPU only)
+    if Context.environment["SPM_CUDA"] != "0" {
+        // Linux with CUDA
 
-    platformExcludes =
-        [
-            "framework",
-            "include-framework",
-            "metal-cpp",
+        platformExcludes =
+            [
+                "framework",
+                "include-framework",
+                "metal-cpp",
 
-            "mlx/mlx/backend/gpu",  // Exclude GPU backend on Linux, use no_gpu instead
-            "mlx/mlx/backend/no_cpu",  // Exclude no_cpu backend on Linux, use cpu instead
-            "mlx/mlx/backend/cpu/gemms/bnns.cpp",  // macOS Accelerate version
-            "mlx-conditional",
-            "mlx-c/mlx/c/metal.cpp",
+                "mlx/mlx/backend/no_gpu",
+                "mlx/mlx/backend/cuda/no_cuda.cpp",
+                "mlx/mlx/backend/cuda/quantized/no_qqmm_impl.cpp",
+                "mlx/mlx/backend/cuda/gemms/cublas_gemm_batched_12_0.cpp",
+                "mlx/mlx/backend/no_cpu",  // Exclude no_cpu backend on Linux, use cpu instead
+                "mlx/mlx/backend/cpu/gemms/bnns.cpp",  // macOS Accelerate version
+                "mlx-conditional",
+                "mlx-c/mlx/c/metal.cpp",
 
-            "mlx-c/mlx/c/fast.cpp",  // Exclude on Linux - calls metal_kernel unconditionally
+                "mlx/mlx/backend/cuda/delayload.cpp",  // For Windows
 
-        ] + noMetalCmlxExcludes + noCudaCmlxExcludes
+                // built by the CudaBuild plugin (nvcc), not by SwiftPM
+                "mlx/mlx/backend/cuda/quantized/qmm",
+            ] + noMetalCmlxExcludes
 
-    cxxSettings = []
+        cxxSettings = [
+            .unsafeFlags(["-I/usr/local/cuda/include"]),
+            .unsafeFlags(["-I/usr/local/cuda/include/cccl"]),
+            .define("MLX_CCCL_DIR", to: "\"/usr/local/cuda/include/cccl\""),
+        ]
 
-    linkerSettings = [
-        .linkedLibrary("gfortran", .when(platforms: [.linux])),
-        .linkedLibrary("blas", .when(platforms: [.linux])),
-        .linkedLibrary("lapack", .when(platforms: [.linux])),
-        .linkedLibrary("openblas", .when(platforms: [.linux])),
-    ]
+        linkerSettings = [
+            .linkedLibrary("gfortran", .when(platforms: [.linux])),
+            .linkedLibrary("blas", .when(platforms: [.linux])),
+            .linkedLibrary("lapack", .when(platforms: [.linux])),
+            .linkedLibrary("openblas", .when(platforms: [.linux])),
+            .unsafeFlags(["-L/usr/local/cuda/lib64"]),
+            .unsafeFlags(["-L/usr/local/cuda/lib64/stubs"]),
+            .linkedLibrary("cudnn"),
+            .linkedLibrary("cublas"),
+            .linkedLibrary("cublasLt"),
+            .linkedLibrary("nvrtc"),
+            .linkedLibrary("cudart"),
+            .linkedLibrary("cuda"),
+        ]
 
-    mlxSwiftExcludes = [
-        "GPU+Metal.swift",
-        "GPU+CUDA.swift",
-        "MLXArray+Metal.swift",
-        "MLXFast.swift",
-        "MLXFastKernel.swift",
-    ]
+        mlxSwiftExcludes = [
+            "GPU+Metal.swift",
+            "MLXArray+Metal.swift",
+        ]
+    } else {
+        // Linux without CUDA (CPU only)
+
+        platformExcludes =
+            [
+                "framework",
+                "include-framework",
+                "metal-cpp",
+
+                "mlx/mlx/backend/gpu",  // Exclude GPU backend on Linux, use no_gpu instead
+                "mlx/mlx/backend/no_cpu",  // Exclude no_cpu backend on Linux, use cpu instead
+                "mlx/mlx/backend/cpu/gemms/bnns.cpp",  // macOS Accelerate version
+                "mlx-conditional",
+                "mlx-c/mlx/c/metal.cpp",
+
+                "mlx-c/mlx/c/fast.cpp",  // Exclude on Linux - calls metal_kernel unconditionally
+
+            ] + noMetalCmlxExcludes + noCudaCmlxExcludes
+
+        cxxSettings = []
+
+        linkerSettings = [
+            .linkedLibrary("gfortran", .when(platforms: [.linux])),
+            .linkedLibrary("blas", .when(platforms: [.linux])),
+            .linkedLibrary("lapack", .when(platforms: [.linux])),
+            .linkedLibrary("openblas", .when(platforms: [.linux])),
+        ]
+
+        mlxSwiftExcludes = [
+            "GPU+Metal.swift",
+            "GPU+CUDA.swift",
+            "MLXArray+Metal.swift",
+            "MLXFast.swift",
+            "MLXFastKernel.swift",
+        ]
+    }
 #else
     // Apple's platforms with Metal
 

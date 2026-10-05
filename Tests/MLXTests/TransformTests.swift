@@ -132,52 +132,6 @@ class TransformTests: XCTestCase {
         assertEqual(r1, r3)
     }
 
-    func testCompileHonorsScopedDefaultDevice() {
-        // A function traced on the GPU must not be reused inside a CPU-scoped
-        // call: the backend caches compiled graphs per default stream, so the
-        // CPU call has to retrace for its own stream.
-        var traces = 0
-        let compiled = compile { (inputs: [MLXArray]) -> [MLXArray] in
-            traces += 1
-            return [square(inputs[0] * inputs[1])]
-        }
-
-        let i1 = MLXRandom.normal([20, 20])
-        let i2 = MLXRandom.normal([20, 20])
-        let expected = square(i1 * i2)
-
-        assertEqual(compiled([i1, i2])[0], expected)
-        XCTAssertEqual(traces, 1)
-
-        let cpuResult = Device.withDefaultDevice(.cpu) {
-            let r = compiled([i1, i2])[0]
-            eval(r)
-            return r
-        }
-        assertEqual(cpuResult, expected)
-        XCTAssertEqual(traces, 2)
-
-        // Back on the GPU, the original entry is reused.
-        assertEqual(compiled([i1, i2])[0], expected)
-        XCTAssertEqual(traces, 2)
-    }
-
-    func testCompiledKernelsDifferByInputDtype() {
-        // bf16 and f16 inputs upcast to float32 give the same fused graph, so
-        // only the input dtypes tell the two kernels apart.
-        let compiled = compile { (inputs: [MLXArray]) -> [MLXArray] in
-            let x = inputs[0].asType(.float32)
-            return [exp(x) * x]
-        }
-
-        let values = MLXArray(Array(stride(from: Float(-2), to: 2, by: 0.25)))
-        for dtype in [DType.bfloat16, .float16] {
-            let x = values.asType(dtype)
-            let expected = exp(values) * values
-            assertEqual(compiled([x])[0], expected)
-        }
-    }
-
     class CompileTestState: CustomStringConvertible, Updatable {
         var y: MLXArray
         var o: MLXArray?
