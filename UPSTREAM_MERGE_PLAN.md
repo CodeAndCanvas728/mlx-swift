@@ -34,6 +34,13 @@ submodule pointer: delete it (`git rm`) and re-vendor the tree instead.
 - **TurboKV**: `mlx/fast/turbo_quant.h` and the TurboQuant decompression path in
   `mlx/backend/metal/kernels/sdpa_vector.h`.
 - **I/O loaders**: `mlx/io/load.{h,cpp}`. Since 0.32.3 upstream's `ParallelFileReader` has its own shared batch pool; the fork keeps that and adds only the iOS guards (`MLX_IO_THREAD_COUNT`, `MLX_IOS_SEQUENTIAL_IO`: sequential `pread()`, one reader thread).
+- **`floor_divide` on unsigned integers** (`mlx/ops.cpp`): upstream #4515 (in 0.32.3) made integer
+  `floor_divide` correct for negative operands by adding `remainder`, `less`, `not_equal`,
+  `logical_and` and `subtract` after the divide. For unsigned dtypes that correction is always zero, so
+  the fork returns the plain quotient. mlx-swift-lm's MoE expert sort (`SwitchLayers.gatherSort`) calls
+  `order.floorDivide(topK)` on uint32 indices in every layer; with #4515 a streamed-experts decode step
+  hit a Metal GPU timeout (found by bisecting 0.32.2..0.32.3). Test:
+  `FloorDivideTests`. Drop this when upstream makes the same change.
 - **Metal device**: `mlx/backend/metal/device.cpp` carries only quieter Metal compile logging. The
   old "lazily create a command encoder when a stream is first used on a new thread" patch is **not**
   carried: upstream's Swift `StreamPool` creates every stream with `mlx_stream_new_thread_unsafe`

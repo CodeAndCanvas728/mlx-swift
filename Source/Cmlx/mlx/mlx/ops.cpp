@@ -3167,6 +3167,13 @@ array floor_divide(
   auto shape = inputs[0].shape();
   auto quotient = array(
       shape, dtype, std::make_shared<Divide>(to_stream(s)), std::move(inputs));
+  // Fork: unsigned integers never need the sign correction below (truncation
+  // and floor agree), and it adds six ops to every call. The MoE expert sort
+  // calls this on uint32 indices in every layer; with the correction a
+  // streamed-experts decode step hit a Metal GPU timeout.
+  if (issubdtype(dtype, unsignedinteger)) {
+    return quotient;
+  }
   auto rem = remainder(a, b, s);
   auto zero = array(0, dtype);
   auto step = logical_and(
